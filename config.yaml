@@ -1,0 +1,19 @@
+# Fichier de configuration du dépôt local.
+# Copie du modèle config.example.yaml, sans secrets.
+
+depot:
+  code: TUL
+
+source:
+  directory: "C:/ATG"
+  file_pattern: "*.txt"
+  stability_wait_seconds: 5
+
+sftp:
+  host: 192.168.1.69
+  port: 22
+  remote_base_path: /upload
+
+logging:
+  file: "C:/ReportUploader/logs/uploader.log"
+  level: INFO

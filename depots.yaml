@@ -1,0 +1,21 @@
+# Registre central de test pour le dépôt DGP uniquement.
+# Les autres dépôts sont volontairement retirés de cette version afin de
+# limiter le test au site courant sans exposer des informations sensibles.
+
+depots:
+  - code: TUL
+    ip_address: 192.168.15.12
+
+sftp_central:
+  host: 192.168.1.69
+  port: 22
+  remote_base_path: /upload
+
+source:
+  directory: "C:/ATG"
+  file_pattern: "*.txt"
+  stability_wait_seconds: 5
+
+logging:
+  directory: "C:/ReportUploader/logs"
+  level: INFO
