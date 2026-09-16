@@ -2,13 +2,13 @@
 # Copier ce fichier en config.yaml sur le serveur 192.168.20.31.
 
 depot:
-  code: TUL
+  code: DGP
 source:
-  directory: C:/ATG
+  directory: C:/Users/TM System/Desktop/RTG Report
   file_pattern: '*.txt'
   stability_wait_seconds: 5
 sftp:
-  host: 192.168.1.9
+  host: 192.168.1.69
   port: 22
   remote_base_path: /upload
 logging:

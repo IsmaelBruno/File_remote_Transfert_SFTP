@@ -43,10 +43,11 @@ class Config:
     source_dir: Path
     file_pattern: str
     stability_wait_seconds: int
+    scan_interval_seconds: int
     sftp_host: str
     sftp_port: int
     sftp_user: str
-    sftp_password: Path
+    sftp_password: str
     remote_base_path: str
     log_file: Path
     log_level: str
@@ -75,6 +76,7 @@ def load_config(config_path: Path) -> Config:
         source_dir=Path(raw["source"]["directory"]),
         file_pattern=raw["source"].get("file_pattern", "*.txt"),
         stability_wait_seconds=raw["source"].get("stability_wait_seconds", 5),
+        scan_interval_seconds=raw["source"].get("scan_interval_seconds", 120),
         sftp_host=raw["sftp"]["host"],
         sftp_port=raw["sftp"].get("port", 22),
         sftp_user=sftp_user,
@@ -115,13 +117,17 @@ def setup_logging(log_file: Path, level: str) -> logging.Logger:
 # --------------------------------------------------------------------------
 
 def is_file_stable(path: Path, wait_seconds: int) -> bool:
-    """Confirme que le fichier n'est plus en cours d'écriture par TankMaster
-    (taille inchangée après une courte pause)."""
+    """Considère le fichier comme stable s'il n'a pas été modifié
+    depuis au moins wait_seconds."""
     try:
-        size_before = path.stat().st_size
-        time.sleep(wait_seconds)
-        size_after = path.stat().st_size
-        return size_after > 0 and size_before == size_after
+        stat = path.stat()
+
+        if stat.st_size <= 0:
+            return False
+
+        file_age = time.time() - stat.st_mtime
+        return file_age >= wait_seconds
+
     except FileNotFoundError:
         return False
 
@@ -151,18 +157,37 @@ def ensure_remote_dir(sftp: paramiko.SFTPClient, remote_dir: str) -> None:
             sftp.mkdir(current)
 
 
-def upload_file(sftp: paramiko.SFTPClient, local_path: Path, remote_dir: str,
-                 logger: logging.Logger) -> None:
-    """Upload atomique : écrit sous un nom temporaire puis renomme côté
-    serveur distant. Objectif : NiFi (ListSFTP) ne doit jamais voir un
-    fichier partiellement transféré, même si le transfert d'un gros fichier
-    prend plusieurs secondes."""
+def upload_file(
+    sftp: paramiko.SFTPClient,
+    local_path: Path,
+    remote_dir: str,
+    logger: logging.Logger,
+) -> None:
     remote_final = f"{remote_dir}/{local_path.name}"
     remote_tmp = f"{remote_final}.part"
 
+    # Nettoye un ancien .part éventuellement laissé par un transfert précédent
+    try:
+        sftp.remove(remote_tmp)
+    except OSError:
+        pass
+
+    # Supprime l'ancien fichier final s'il existe
+    try:
+        sftp.remove(remote_final)
+    except OSError:
+        pass
+
     sftp.put(str(local_path), remote_tmp)
     sftp.rename(remote_tmp, remote_final)
-    logger.info("Transféré : %s -> %s", local_path.name, remote_final)
+
+    logger.info(
+        "Transféré : %s -> %s",
+        local_path.name,
+        remote_final,
+    )
+
+
 
 
 # --------------------------------------------------------------------------
@@ -246,29 +271,74 @@ def run_cycle(config: Config, logger: logging.Logger, dry_run: bool = False) -> 
 # --------------------------------------------------------------------------
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Agent d'upload des rapports TankMaster vers le SFTP central.")
-    parser.add_argument("--config", required=True, type=Path, help="Chemin vers config.yaml")
+    parser = argparse.ArgumentParser(
+        description="Agent permanent d'upload des rapports TankMaster vers le SFTP central."
+    )
+
+    parser.add_argument(
+        "--config",
+        required=True,
+        type=Path,
+        help="Chemin vers config.yaml",
+    )
+
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Vérifie les fichiers détectés et simule le cycle sans transférer ni déplacer de fichiers.",
+        help="Simule les cycles sans transférer ni déplacer les fichiers.",
     )
+
     args = parser.parse_args()
 
     try:
         config = load_config(args.config)
-    except Exception as exc:  # erreur de config = échec net, visible dans l'historique du scheduler
+    except Exception as exc:
         print(f"Erreur de configuration : {exc}", file=sys.stderr)
         return 2
 
     logger = setup_logging(config.log_file, config.log_level)
 
-    try:
-        return run_cycle(config, logger, dry_run=args.dry_run)
-    except Exception:
-        logger.exception("[%s] Erreur non gérée durant le cycle.", config.depot_code)
-        return 1
+    logger.info(
+        "[%s] Agent démarré. Surveillance continue de %s toutes les %s secondes.",
+        config.depot_code,
+        config.source_dir,
+        config.scan_interval_seconds,
+    )
 
+    try:
+        while True:
+            try:
+                run_cycle(
+                    config,
+                    logger,
+                    dry_run=args.dry_run,
+                )
+
+                # Tant qu'il y a des fichiers à traiter,
+                # on recommence immédiatement.
+                candidates = find_candidate_files(
+                    config.source_dir,
+                    config.file_pattern,
+                )
+
+                if not candidates:
+                    time.sleep(config.scan_interval_seconds)
+
+            except Exception:
+                logger.exception(
+                    "[%s] Erreur non gérée durant le cycle.",
+                    config.depot_code,
+                )
+
+                # Évite une boucle d'erreur trop agressive
+                time.sleep(10)
+
+    except KeyboardInterrupt:
+        logger.info(
+            "[%s] Agent arrêté manuellement.",
+            config.depot_code,
+        )
+        return 0
 
 if __name__ == "__main__":
     sys.exit(main())

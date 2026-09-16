@@ -3,8 +3,8 @@
 # limiter le test au site courant sans exposer des informations sensibles.
 
 depots:
-  - code: TUL
-    ip_address: 192.168.15.12
+  - code: DGP
+    ip_address: 192.168.20.31
 
 sftp_central:
   host: 192.168.1.69
@@ -12,7 +12,7 @@ sftp_central:
   remote_base_path: /upload
 
 source:
-  directory: "C:/ATG"
+  directory: "C:/Users/TM System/Desktop/RTG Report"
   file_pattern: "*.txt"
   stability_wait_seconds: 5
 
